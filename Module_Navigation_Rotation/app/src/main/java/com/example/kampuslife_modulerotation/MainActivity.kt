@@ -1,20 +1,26 @@
 package com.example.kampuslife_modulerotation
 
-import android.os.Bundle
-import androidx.activity.enableEdgeToEdge
-import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
+import android.Manifest
+import android.content.pm.PackageManager
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.widget.ImageView
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import kotlin.math.atan2
+import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.isVisible
+import kotlin.math.abs
 
 class MainActivity : AppCompatActivity(), SensorEventListener {
 
@@ -22,68 +28,36 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var bg: ImageView
     private lateinit var tvMagnetometer: TextView
     private lateinit var tvGyrometer: TextView
-    private var gyroscope: Sensor? = null
-    private var magnetometer: Sensor? = null
+    private lateinit var loadingLayout: LinearLayout
+
+    private var rotationVectorSensor: Sensor? = null
+    private var pedometerSensor: Sensor? = null
+    private val rotationMatrix = FloatArray(9)
+    private val orientationAngles = FloatArray(3)
+    private var initialStepCount: Float? = null
+    private var lastStepValue: Int = 0
+    private var stepsSinceMapResume: Int = 0
     private var rotationVal = 0f
-    private var lastGyroTimestamp = 0L
-    private var smoothedRotation = 0f
-    private var compHistory = floatArrayOf(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f)
-    private var histCount = 0
-    private val handler = Handler(Looper.getMainLooper())
-    private val magIntervalMs = 1000L
     private val smoothingFactor = 0.1f
-
-    private val magSampleRunnable = Runnable { requestSingleMagReading() }
-
-    private fun normalizeAngle(angle : Float) : Float {
-        var a = angle % 360f
-        if(a < 0f) a += 360f
-        return a
-    }
-
-    private fun shortestAngleDiff(current : Float, target : Float) : Float {
-        val diff = (target - current + 540f) % 360f - 180f
-        return diff
-    }
-
-    private val singleMagListener = object : SensorEventListener {
-        override fun onSensorChanged(event: SensorEvent?) {
-            if (event?.sensor?.type == Sensor.TYPE_MAGNETIC_FIELD) {
-                var x= event.values[0]
-                var y= event.values[1]
-                var z= event.values[2]
-                val headingRad = if (z < 25f) atan2(y.toDouble(), x.toDouble()) else atan2(y.toDouble(), z.toDouble())
-                var headingDeg = Math.toDegrees(headingRad).toFloat()
-                headingDeg = normalizeAngle(headingDeg)
-
-                compHistory[histCount] = headingDeg
-
-                if(histCount == compHistory.size-1) {
-                    val currentHeading = normalizeAngle(rotationVal)
-                    var sum = 0f
-                    for (v in compHistory) {
-                        sum += v
-                    }
-                    val avg = sum / compHistory.size
-                    val diff = shortestAngleDiff(currentHeading, avg)
-                    val correctionStrength = 0.05f
-                    val newHeading = normalizeAngle(currentHeading + diff * correctionStrength)
-                    rotationVal = newHeading
-                    updateArrowRotation()
-                }
-                histCount = (histCount + 1) % compHistory.size
-                tvMagnetometer.text = "X: $x\nY: $y\nZ: $z"
-                sensorManager.unregisterListener(this)
-                handler.postDelayed(magSampleRunnable, magIntervalMs)
-            }
+    private val ACTIVITY_RECOGNITION_REQ = 1001
+    private val MAP_MOVEMENT_SCALE = 50f
+    private val sensorsToInitialize = mutableSetOf<Int>()
+    private val sensorTimeoutHandler = Handler(Looper.getMainLooper())
+    private val sensorTimeoutRunnable = Runnable {
+        if (::loadingLayout.isInitialized && loadingLayout.isVisible) {
+            loadingLayout.visibility = View.GONE
+            Toast.makeText(this, "Sensor initialization timed out. Some sensors may not be active.", Toast.LENGTH_LONG).show()
         }
-
-        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) { }
     }
 
-    private fun requestSingleMagReading() {
-        magnetometer?.also { magnetometer ->
-            sensorManager.registerListener(singleMagListener, magnetometer, SensorManager.SENSOR_DELAY_NORMAL)
+    private fun ensureActivityRecognitionPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(
+                    arrayOf(Manifest.permission.ACTIVITY_RECOGNITION),
+                    ACTIVITY_RECOGNITION_REQ
+                )
+            }
         }
     }
 
@@ -91,64 +65,104 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
+
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
             insets
         }
+        ensureActivityRecognitionPermission()
 
         bg = findViewById(R.id.bg)
         tvMagnetometer = findViewById(R.id.tvMagnetometer)
         tvGyrometer = findViewById(R.id.tvGyrometer)
-
+        loadingLayout = findViewById(R.id.loading_layout)
 
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
 
-        gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-        if(gyroscope == null)
-            Toast.makeText(this, "Gyrometer not available", Toast.LENGTH_SHORT).show()
-        magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
-        if(magnetometer == null)
-            Toast.makeText(this, "Magnetometer not available", Toast.LENGTH_SHORT).show()
+        rotationVectorSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+        if (rotationVectorSensor == null)
+            Toast.makeText(this, "Rotation Vector Sensor not available", Toast.LENGTH_SHORT).show()
+        pedometerSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
+        if (pedometerSensor == null)
+            Toast.makeText(this, "Pedometer Sensor not available", Toast.LENGTH_SHORT).show()
     }
 
     override fun onResume() {
         super.onResume()
-        gyroscope?.also { gyroscope ->
-            sensorManager.registerListener(this, gyroscope, SensorManager.SENSOR_DELAY_GAME)
+        sensorsToInitialize.clear()
+        
+        rotationVectorSensor?.also { sensor -> sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME) }
+        pedometerSensor?.also { sensor -> sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_GAME) }
+        
+        if (sensorsToInitialize.isNotEmpty()) {
+            loadingLayout.visibility = View.VISIBLE
+            sensorTimeoutHandler.postDelayed(sensorTimeoutRunnable, 10000)
+        } else {
+            loadingLayout.visibility = View.GONE
         }
-        handler.post(magSampleRunnable)
     }
 
     override fun onPause() {
         super.onPause()
+        initialStepCount = null
         sensorManager.unregisterListener(this)
-        sensorManager.unregisterListener(singleMagListener)
-        handler.removeCallbacks(magSampleRunnable)
+        sensorTimeoutHandler.removeCallbacks(sensorTimeoutRunnable)
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        if(event.sensor.type == Sensor.TYPE_GYROSCOPE) {
-            if(lastGyroTimestamp != 0L) {
-                val dt = (event.timestamp - lastGyroTimestamp) / 1_000_000_000f
-                val omegaZ = event.values[2]
-                val deltaDeg = Math.toDegrees(omegaZ * dt.toDouble()).toFloat()
-
-                rotationVal = (rotationVal + deltaDeg + 360f) % 360f
-                updateArrowRotation()
-                tvGyrometer.text = "X: ${event.values[0]}\nY: ${event.values[1]}\nZ: ${event.values[2]}"
+        if (sensorsToInitialize.contains(event.sensor.type)) {
+            sensorsToInitialize.remove(event.sensor.type)
+            if (sensorsToInitialize.isEmpty()) {
+                loadingLayout.visibility = View.GONE
+                sensorTimeoutHandler.removeCallbacks(sensorTimeoutRunnable)
             }
-            lastGyroTimestamp = event.timestamp
+        }
+        var azimuthRad = 0f
+        if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+            SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+            SensorManager.getOrientation(rotationMatrix, orientationAngles)
+            azimuthRad = orientationAngles[0]
+            var azimuthDeg = Math.toDegrees(azimuthRad.toDouble()).toFloat()
+            azimuthDeg = normalizeAngle(azimuthDeg)
+            val pitchDeg = Math.toDegrees(orientationAngles[1].toDouble()).toInt()
+            if(abs(pitchDeg) < 80)
+                rotationVal = azimuthDeg
+            updateArrowRotation()
+            tvMagnetometer.text = "Compass: ${azimuthDeg.toInt()}°"
+        }
+        if(event.sensor.type == Sensor.TYPE_STEP_COUNTER) {
+            val totalStepsSinceBoot = event.values[0]
+            if(initialStepCount == null)
+                initialStepCount = totalStepsSinceBoot
+            stepsSinceMapResume = (totalStepsSinceBoot - (initialStepCount ?: totalStepsSinceBoot)).toInt()
+            val stepDiff = (stepsSinceMapResume - lastStepValue)
+            if (stepDiff > 0)
+                calculateMovementDirection(stepDiff, azimuthRad)
+            tvGyrometer.text = "Pedometer: $stepsSinceMapResume"
         }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) { }
 
+    private fun calculateMovementDirection(stepDiff : Int, angleRad : Float) {
+        val moveX = kotlin.math.sin(angleRad).toFloat() * MAP_MOVEMENT_SCALE * stepDiff * 0.5f
+        val moveY = kotlin.math.cos(angleRad).toFloat() * MAP_MOVEMENT_SCALE * stepDiff * 0.5f
+        bg.animate().translationXBy(-moveX).translationYBy(moveY).setDuration(200).start()
+        lastStepValue = stepsSinceMapResume
+    }
     private fun updateArrowRotation() {
-        val current = rotationVal
-        val target = normalizeAngle(rotationVal)
+        val current = bg.rotation
+        val target = normalizeAngle(-rotationVal)
         val diff = shortestAngleDiff(current, target)
-        smoothedRotation = normalizeAngle(current + diff * smoothingFactor)
-        bg.rotation = rotationVal
+        val newRotation =  current + diff * smoothingFactor
+        bg.rotation = newRotation
+    }
+    private fun normalizeAngle(angle: Float): Float {
+        return (angle + 360f) % 360f
+    }
+    private fun shortestAngleDiff(current: Float, target: Float): Float {
+        val diff = (target - current + 540f) % 360f - 180f
+        return diff
     }
 }

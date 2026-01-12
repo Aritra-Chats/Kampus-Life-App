@@ -2,4 +2,5 @@
     <string name="app_name">Kampus Life - Module Rotation</string>
     <string name="arrow">Arrow image</string>
     <string name="bg">Background</string>
+    <string name="initialLoading">Initializing Sensors…</string>
 </resources>
