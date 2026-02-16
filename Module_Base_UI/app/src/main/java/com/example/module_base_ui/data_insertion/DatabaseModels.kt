@@ -16,10 +16,10 @@ data class TeacherList(
     @SerializedName("_id")
     val id: String? = null,
     val name: String? = null,
-    val roll: Int? = null,
     val email: String? = null,
     val phone: String? = null,
-    val cabin: String? = null
+    val cabin: String? = null,
+    val sections: List<String>? = null
 )
 
 data class Routine(

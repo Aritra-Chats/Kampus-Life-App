@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
@@ -48,9 +47,7 @@ import java.time.format.FormatStyle
 @Composable
 fun Routine(designation : String, currentSection : String) {
     var routineData by remember { mutableStateOf<List<Routine>>(emptyList()) }
-    LaunchedEffect(Unit) {
-        try { routineData = loadRoutineData() } catch (e: Exception) { }
-    }
+    LaunchedEffect(Unit) { try { routineData = loadRoutineData() } catch (e: Exception) { } }
     if(designation == "Student") StudentRoutine(routineData, currentSection)
 }
 
@@ -101,7 +98,7 @@ fun StudentRoutine(routineData : List<Routine>, currentSection: String) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val isActive = try{ LocalTime.now().isBefore(LocalTime.parse(times[1].trim())) && LocalTime.now().isAfter(LocalTime.parse(times[0].trim())) } catch(e : Exception) { false }
                             Image(painter = painterResource(id = if(isActive) R.drawable.active_class else R.drawable.inactive_class), contentDescription = "Class Status", modifier = Modifier.height(84.dp).width(16.dp))
-                            Box(modifier = Modifier.fillMaxWidth().height(90.dp)) {
+                            Box(modifier = Modifier.fillMaxWidth().height(90.dp).padding(bottom = 18.dp)) {
                                 RoutineItemGlass(modifier = Modifier.fillMaxSize())
                                 Row(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(modifier = Modifier.weight(1f)) {
