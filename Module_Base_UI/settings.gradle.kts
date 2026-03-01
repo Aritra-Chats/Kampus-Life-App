@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Module_Base_UI"
 include(":app")
+include(":feature-auth")
