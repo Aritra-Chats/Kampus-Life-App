@@ -28,7 +28,7 @@ import com.example.kampus_life_official.ui.theme.responsiveSp
 import androidx.core.content.edit
 
 @Composable
-fun Notification(selectedCategory: Int, notifications: List<Notification>) {
+fun Notification(selectedCategory: Int, notifications: List<Notification>, expandNotificationId: String? = null) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("notification_prefs", Context.MODE_PRIVATE) }
     var favoriteIds by remember { mutableStateOf(prefs.getStringSet("favorites", emptySet()) ?: emptySet()) }
@@ -45,7 +45,12 @@ fun Notification(selectedCategory: Int, notifications: List<Notification>) {
         } catch (e: Exception) { e.printStackTrace() }
     }
 
-    DisplayNotifications(notifications = notifications, selectedCategory = selectedCategory, favoriteIds = favoriteIds, onToggleFavorite = { id ->
+    DisplayNotifications(
+        notifications = notifications, 
+        selectedCategory = selectedCategory, 
+        favoriteIds = favoriteIds, 
+        expandNotificationId = expandNotificationId,
+        onToggleFavorite = { id ->
             val newFavorites = if (favoriteIds.contains(id)) favoriteIds - id else favoriteIds + id
             favoriteIds = newFavorites
             prefs.edit { putStringSet("favorites", newFavorites) }
@@ -54,8 +59,8 @@ fun Notification(selectedCategory: Int, notifications: List<Notification>) {
 }
 
 @Composable
-fun DisplayNotifications(notifications: List<Notification>, selectedCategory: Int, favoriteIds: Set<String>, onToggleFavorite: (String) -> Unit) {
-    var expandedNotificationId by remember { mutableStateOf<String?>(null) }
+fun DisplayNotifications(notifications: List<Notification>, selectedCategory: Int, favoriteIds: Set<String>, expandNotificationId: String? = null, onToggleFavorite: (String) -> Unit) {
+    var expandedNotificationId by remember { mutableStateOf<String?>(expandNotificationId) }
 
     val filteredAndSortedNotifications = remember(notifications, selectedCategory, favoriteIds) {
         val filtered = if (selectedCategory == 0) {

@@ -22,10 +22,11 @@ class ClassCheckService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = NotificationCompat.Builder(this, "kampus_life_notifications")
+        val notification = NotificationCompat.Builder(this, "kampus_life_service")
             .setContentTitle("Kampus Life Monitoring")
-            .setContentText("Checking for classes and announcements...")
+            .setContentText("Checking for upcoming classes...")
             .setSmallIcon(R.drawable.logo)
+            .setOngoing(true)
             .setSilent(true)
             .build()
         
@@ -43,7 +44,7 @@ class ClassCheckService : Service() {
                     stopSelf()
                     break
                 }
-                delay(5 * 60 * 1000)
+                delay(5 * 60 * 1000) // Check every 5 minutes
             }
         }
     }
@@ -76,15 +77,16 @@ class ClassCheckService : Service() {
         val now = LocalTime.now()
         filteredRoutines.forEach { routine ->
             val startTimeStr = routine.time?.split("-")?.firstOrNull()?.trim() ?: return@forEach
-            val startTime = LocalTime.parse(startTimeStr)
+            val startTime = try { LocalTime.parse(startTimeStr) } catch (_: Exception) { return@forEach }
 
             val minutesUntilClass = java.time.Duration.between(now, startTime).toMinutes()
-            if (minutesUntilClass in 11..15) {
+            // Notify if class is in 10-15 minutes
+            if (minutesUntilClass in 10..15) {
                 val isFirst = (routine.id == firstClass?.id)
                 NotificationHelper.showNotification(
                     this@ClassCheckService,
                     "Upcoming Lecture",
-                    "${routine.subject} lecture is in ${routine.classroom} from ${routine.time}, Please join!",
+                    "${routine.subject} lecture is in ${routine.classroom} at ${routine.time}. Please join!",
                     routine.hashCode(),
                     notificationType = NotificationType.Routine,
                     isFirstClass = isFirst
@@ -114,13 +116,14 @@ class ClassCheckService : Service() {
         
         val lastClass = filteredRoutines.maxByOrNull { routine ->
             val startTimeStr = routine.time?.split("-")?.firstOrNull()?.trim() ?: "00:00"
-            LocalTime.parse(startTimeStr)
+            try { LocalTime.parse(startTimeStr) } catch (_: Exception) { LocalTime.MIN }
         } ?: return true
         
         val lastStartTimeStr = lastClass.time?.split("-")?.firstOrNull()?.trim() ?: return true
-        val lastStartTime = LocalTime.parse(lastStartTimeStr)
+        val lastStartTime = try { LocalTime.parse(lastStartTimeStr) } catch (_: Exception) { return true }
         
-        return LocalTime.now().isAfter(lastStartTime)
+        // Stop service 10 minutes after the last class starts
+        return LocalTime.now().isAfter(lastStartTime.plusMinutes(10))
     }
 
     override fun onDestroy() {

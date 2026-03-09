@@ -19,7 +19,9 @@ import java.util.Calendar
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            "CHECK_DAILY_CLASSES" -> checkAndScheduleFirstClassAlarm(context)
+            Intent.ACTION_BOOT_COMPLETED, "CHECK_DAILY_CLASSES" -> {
+                checkAndScheduleFirstClassAlarm(context)
+            }
             "START_CLASS_MONITOR" -> {
                 val serviceIntent = Intent(context, ClassCheckService::class.java)
                 context.startForegroundService(serviceIntent)
@@ -31,6 +33,12 @@ class AlarmReceiver : BroadcastReceiver() {
         val user = LocalStorage.loadUser(context) ?: return
         val routineData = LocalStorage.loadData(context, LocalStorage.KEY_ROUTINE, object : TypeToken<List<Routine>>() {})
         
+        // If routine data is empty, it might be a network issue or first run. Retry in 30 mins.
+        if (routineData.isEmpty()) {
+            scheduleRetry(context)
+            return
+        }
+
         val today = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE"))
         
         val filteredRoutines = when (user.role) {
@@ -61,7 +69,17 @@ class AlarmReceiver : BroadcastReceiver() {
             set(Calendar.SECOND, 0)
         }
 
-        if (calendar.timeInMillis <= System.currentTimeMillis()) return
+        // If alarm time for today has already passed, we don't schedule it for today.
+        // However, if the first class is currently or soon, we might want to start monitor immediately.
+        if (calendar.timeInMillis <= System.currentTimeMillis()) {
+            val now = LocalTime.now()
+            if (now.isBefore(startTime)) {
+                // Class hasn't started yet but it's within 30 mins. Start service.
+                val serviceIntent = Intent(context, ClassCheckService::class.java)
+                context.startForegroundService(serviceIntent)
+            }
+            return
+        }
 
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val startIntent = Intent(context, AlarmReceiver::class.java).apply {
@@ -78,5 +96,16 @@ class AlarmReceiver : BroadcastReceiver() {
         } else {
             alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
         }
+    }
+
+    private fun scheduleRetry(context: Context) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val retryIntent = Intent(context, AlarmReceiver::class.java).apply {
+            action = "CHECK_DAILY_CLASSES"
+        }
+        val pendingIntent = PendingIntent.getBroadcast(context, 0, retryIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        
+        val retryTime = System.currentTimeMillis() + (30 * 60 * 1000) // 30 mins
+        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, retryTime, pendingIntent)
     }
 }

@@ -23,7 +23,8 @@ class AnnouncementWorker(context: Context, params: WorkerParameters) : Coroutine
                         announcement.subject ?: "New Announcement",
                         announcement.body ?: "",
                         announcement.hashCode(),
-                        notificationType = NotificationType.Announcement
+                        notificationType = NotificationType.Announcement,
+                        dataId = announcement.id
                     )
                 }
                 LocalStorage.saveData(applicationContext, LocalStorage.KEY_NOTIFICATIONS, remoteNotifications)
