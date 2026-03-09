@@ -1,6 +1,8 @@
 package com.example.kampus_life_official.ui.pages
 
 import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,84 +29,58 @@ import com.example.kampus_life_official.loadNotifications
 import com.example.kampus_life_official.loadRoutineData
 import com.example.kampus_life_official.loadStudentData
 import com.example.kampus_life_official.loadTeacherData
+import com.example.kampus_life_official.login.AuthSession
 import com.example.kampus_life_official.login.UserRole
 import com.example.kampus_life_official.ui.theme.ShadedPanel
 import com.example.kampus_life_official.ui.theme.GoogleLoginButton
 import com.example.kampus_life_official.ui.theme.responsiveDp
 import com.example.kampus_life_official.ui.theme.responsiveSp
+import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(activity: Activity, authManager: GoogleAuthManager, onAuthSuccess: (AuthUser) -> Unit) {
     var isLoading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
+    val fallbackLauncher = rememberLauncherForActivityResult(contract = ActivityResultContracts.StartActivityForResult()) {
+        result ->
+        coroutineScope.launch {
+            val fallbackResult = authManager.handleFallbackResult(result.data)
+            fallbackResult.onSuccess { user ->
+                syncAndProceed(user = user, context = context,
+                    onSuccess = { isLoading = false; onAuthSuccess(user) },
+                    onFailure = { isLoading = false; error = it }
+                )
+            }
+            fallbackResult.onFailure { throwable ->
+                isLoading = false
+                error = throwable.localizedMessage ?: "Sign-in failed"
+            }
+        }
+    }
 
     LaunchedEffect(isLoading) {
         if (!isLoading) return@LaunchedEffect
         
-        val result = authManager.signIn(activity)
-        
-        result.onSuccess { user ->
-            try {
-                // 1. Fetch Student/Teacher Data first to verify registration
-                val fetchedStudentData = loadStudentData()
-                val fetchedTeacherData = loadTeacherData()
-                
-                val userEmail = user.email.lowercase().trim()
-                val rollInt = user.rollNumber?.toIntOrNull()
-
-                // Robust matching: Try matching by email first, then by roll number
-                val userInDb = when (user.role) {
-                    UserRole.STUDENT -> {
-                        fetchedStudentData.find {
-                            it.email?.lowercase()?.trim() == userEmail || (rollInt != null && it.roll == rollInt)
-                        }
-                    }
-                    UserRole.TEACHER -> {
-                        fetchedTeacherData.find {
-                            it.email?.lowercase()?.trim() == userEmail
-                        }
-                    }
-                    else -> null
-                }
-
-                if (userInDb == null) {
-                    throw Exception("Account ($userEmail) not registered in database. Contact Support.")
-                }
-
-                // 2. Save Basic Data
-                LocalStorage.saveData(context, LocalStorage.KEY_STUDENTS, fetchedStudentData)
-                LocalStorage.saveData(context, LocalStorage.KEY_TEACHERS, fetchedTeacherData)
-
-                // 3. Fetch all other required data sequentially
-                val fetchedRoutineData = loadRoutineData()
-                LocalStorage.saveData(context, LocalStorage.KEY_ROUTINE, fetchedRoutineData)
-
-                val fetchedMentorData = loadMentorData()
-                LocalStorage.saveData(context, LocalStorage.KEY_MENTORS, fetchedMentorData)
-
-                val fetchedAdministrationData = loadAdministrationData()
-                LocalStorage.saveData(context, LocalStorage.KEY_ADMIN, fetchedAdministrationData)
-
-                val fetchedNotifications = loadNotifications()
-                LocalStorage.saveData(context, LocalStorage.KEY_NOTIFICATIONS, fetchedNotifications)
-
-                val fetchedHolidays = loadHolidays()
-                LocalStorage.saveData(context, LocalStorage.KEY_HOLIDAYS, fetchedHolidays)
-
-                // 4. Data synced successfully, move to Main
-                isLoading = false
-                onAuthSuccess(user)
-                
-            } catch (e: Exception) {
-                isLoading = false
-                error = e.localizedMessage ?: "Sync failed"
-            }
+        val result = authManager.signIn(activity) { fallbackIntent ->
+            fallbackLauncher.launch(fallbackIntent)
         }
         
-        result.onFailure { throwable ->
-            isLoading = false
-            error = throwable.localizedMessage ?: "Sign-in failed" 
+        when {
+            result.exceptionOrNull() is GoogleAuthManager.FallbackTriggeredException -> return@LaunchedEffect
+            result.isSuccess -> {
+                val user = result.getOrThrow()
+                syncAndProceed(user = user, context = context,
+                    onSuccess = { isLoading = false; onAuthSuccess(user) },
+                    onFailure = { isLoading = false; error = it }
+                )
+            }
+            result.isFailure -> {
+                isLoading = false
+                error = result.exceptionOrNull()?.localizedMessage ?: "Sign-in failed"
+            }
         }
     }
 
@@ -134,4 +110,45 @@ fun LoginScreen(activity: Activity, authManager: GoogleAuthManager, onAuthSucces
             }
         }
     }
+}
+
+private suspend fun syncAndProceed(user: AuthUser, context: android.content.Context, onSuccess: () -> Unit, onFailure: (String) -> Unit) {
+    try {
+        val fetchedStudentData = loadStudentData()
+        val fetchedTeacherData = loadTeacherData()
+
+        val userEmail = user.email.lowercase().trim()
+        val rollInt = user.rollNumber?.toIntOrNull()
+
+        val userInDb = when (user.role) {
+            UserRole.STUDENT -> fetchedStudentData.find { it.email?.lowercase()?.trim() == userEmail || (rollInt != null && it.roll == rollInt) }
+            UserRole.TEACHER -> fetchedTeacherData.find { it.email?.lowercase()?.trim() == userEmail }
+            else -> null
+        }
+
+        if (userInDb == null) {
+            AuthSession.clear(context)
+            throw Exception("Account ($userEmail) not registered in database. Contact Support.")
+        }
+
+        LocalStorage.saveData(context, LocalStorage.KEY_STUDENTS, fetchedStudentData)
+        LocalStorage.saveData(context, LocalStorage.KEY_TEACHERS, fetchedTeacherData)
+
+        val fetchedRoutineData = loadRoutineData()
+        LocalStorage.saveData(context, LocalStorage.KEY_ROUTINE, fetchedRoutineData)
+
+        val fetchedMentorData = loadMentorData()
+        LocalStorage.saveData(context, LocalStorage.KEY_MENTORS, fetchedMentorData)
+
+        val fetchedAdministrationData = loadAdministrationData()
+        LocalStorage.saveData(context, LocalStorage.KEY_ADMIN, fetchedAdministrationData)
+
+        val fetchedNotifications = loadNotifications()
+        LocalStorage.saveData(context, LocalStorage.KEY_NOTIFICATIONS, fetchedNotifications)
+
+        val fetchedHolidays = loadHolidays()
+        LocalStorage.saveData(context, LocalStorage.KEY_HOLIDAYS, fetchedHolidays)
+
+        onSuccess()
+    } catch (e: Exception) { onFailure(e.localizedMessage ?: "Sync failed") }
 }

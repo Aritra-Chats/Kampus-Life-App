@@ -85,10 +85,3 @@ suspend fun parseKiitTeacherEmail(email: String): ParsedKiitInfo {
         error = null
     )
 }
-
-val teacherOverrideEmails = setOf("yt.nbt.2812@gmail.com", "aritrathegamer-5@gmail.com")
-
-fun applyRoleOverrides(user: AuthUser): AuthUser {
-    if (user.email.lowercase().trim() in teacherOverrideEmails) { return user.copy(role = UserRole.TEACHER) }
-    return user
-}

@@ -1,8 +1,8 @@
 package com.example.kampus_life_official.ui.pages
 
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -55,7 +55,7 @@ fun Notification(selectedCategory: Int, notifications: List<Notification>) {
 
 @Composable
 fun DisplayNotifications(notifications: List<Notification>, selectedCategory: Int, favoriteIds: Set<String>, onToggleFavorite: (String) -> Unit) {
-    var selectedNotification by remember { mutableStateOf<Notification?>(null) }
+    var expandedNotificationId by remember { mutableStateOf<String?>(null) }
 
     val filteredAndSortedNotifications = remember(notifications, selectedCategory, favoriteIds) {
         val filtered = if (selectedCategory == 0) {
@@ -73,59 +73,41 @@ fun DisplayNotifications(notifications: List<Notification>, selectedCategory: In
     }
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Image(
-            painter = painterResource(id = R.drawable.background),
-            contentDescription = "Background",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+        Image(painter = painterResource(id = R.drawable.background), contentDescription = "Background", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         Box(modifier = Modifier.fillMaxSize().padding(top = responsiveDp(250.dp)), contentAlignment = Alignment.TopCenter) {
             Column(modifier = Modifier.fillMaxWidth().padding(horizontal = responsiveDp(16.dp)).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(responsiveDp(12.dp))) {
                 filteredAndSortedNotifications.forEach { notification -> 
-                    DisplayNotificationEntry(notification = notification, isFavorite = favoriteIds.contains(notification.id), onClick = { selectedNotification = notification }, onToggleFavorite = { notification.id?.let { onToggleFavorite(it) } })
+                    DisplayNotificationEntry(notification = notification, isFavorite = favoriteIds.contains(notification.id), isExpanded = expandedNotificationId == notification.id, onClick = { expandedNotificationId = if (expandedNotificationId == notification.id) null else notification.id }, onToggleFavorite = { notification.id?.let { onToggleFavorite(it) } })
                 }
                 Spacer(modifier = Modifier.height(responsiveDp(100.dp)))
             }
         }
-
-        selectedNotification?.let { notification -> NotificationOverlay(notification = notification, onDismiss = { selectedNotification = null }) }
     }
 }
 
 @Composable
-fun DisplayNotificationEntry(notification: Notification, isFavorite: Boolean, onClick: () -> Unit, onToggleFavorite: () -> Unit) {
-    Box(modifier = Modifier.fillMaxWidth().height(responsiveDp(120.dp)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClick() }) {
-        RoutineItemGlass(modifier = Modifier.fillMaxSize())
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = responsiveDp(20.dp), vertical = responsiveDp(12.dp)), verticalArrangement = Arrangement.spacedBy(responsiveDp(4.dp))) {
+fun DisplayNotificationEntry(notification: Notification, isFavorite: Boolean, isExpanded: Boolean, onClick: () -> Unit, onToggleFavorite: () -> Unit) {
+    Box(modifier = Modifier.fillMaxWidth().wrapContentHeight().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onClick() }) {
+        RoutineItemGlass(modifier = Modifier.matchParentSize())
+        Column(modifier = Modifier.padding(horizontal = responsiveDp(24.dp)).padding(top = responsiveDp(20.dp))) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text(text = notification.sender ?: "Unknown", color = Color.White, fontSize = responsiveSp(18.sp), fontWeight = FontWeight.Bold)
-                Text(text = notification.sendTime ?: "", color = Color.White.copy(alpha = 0.6f), fontSize = responsiveSp(12.sp))
+                Text(text = notification.sender ?: "Unknown", color = Color.White, fontSize = responsiveSp(24.sp), fontWeight = FontWeight.Bold)
+                Image(painter = painterResource(id = if (isFavorite) R.drawable.filled_star else R.drawable.star), contentDescription = "Favorite", modifier = Modifier.size(responsiveDp(22.dp)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onToggleFavorite() })
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.Start) {
-                    Text(text = notification.subject ?: "No Subject", color = Color.White, fontSize = responsiveSp(16.sp), fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(text = notification.body ?: "", color = Color.Gray.copy(alpha = 0.8f), fontSize = responsiveSp(14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(text = notification.sendTime ?: "", color = Color.White.copy(alpha = 0.6f), fontSize = responsiveSp(16.sp))
+            Spacer(modifier = Modifier.height(responsiveDp(4.dp)))
+            Text(text = "Subject: ${notification.subject ?: "No Subject"}", color = Color.White.copy(alpha = 0.6f), fontSize = responsiveSp(16.sp), fontWeight = FontWeight.SemiBold, maxLines = if (isExpanded) Int.MAX_VALUE else 1, overflow = TextOverflow.Ellipsis)
+            
+            if (!isExpanded)
+                Text(text = notification.body ?: "", color = Color.White.copy(alpha = 0.5f), fontSize = responsiveSp(14.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+
+            AnimatedVisibility(visible = isExpanded) {
+                Column {
+                    Spacer(modifier = Modifier.height(responsiveDp(20.dp)))
+                    Text(text = notification.body ?: "", color = Color.White.copy(alpha = 0.9f), fontSize = responsiveSp(16.sp), lineHeight = responsiveSp(22.sp))
                 }
-                Image(painter = painterResource(id = if (isFavorite) R.drawable.filled_star else R.drawable.star), contentDescription = "Favorite", modifier = Modifier.size(responsiveDp(20.dp)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onToggleFavorite() }
-                )
             }
-        }
-    }
-}
-
-@Composable
-fun NotificationOverlay(notification: Notification, onDismiss: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.8f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onDismiss() }, contentAlignment = Alignment.Center) {
-        Box(modifier = Modifier.fillMaxWidth(0.85f).fillMaxHeight(0.6f).clickable(enabled = false) {}) {
-            RoutineItemGlass(modifier = Modifier.fillMaxSize())
-            Column(modifier = Modifier.fillMaxSize().padding(responsiveDp(24.dp)).verticalScroll(rememberScrollState()), horizontalAlignment = Alignment.Start) {
-                Text(text = notification.sender ?: "Unknown", color = Color.White, fontSize = responsiveSp(22.sp), fontWeight = FontWeight.Bold)
-                Text(text = notification.sendTime ?: "", color = Color.White.copy(alpha = 0.6f), fontSize = responsiveSp(12.sp), modifier = Modifier.padding(bottom = responsiveDp(16.dp)))
-                Text(text = notification.subject ?: "No Subject", color = Color.White, fontSize = responsiveSp(18.sp), fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = responsiveDp(8.dp)))
-                Text(text = notification.body ?: "", color = Color.White.copy(alpha = 0.9f), fontSize = responsiveSp(16.sp), lineHeight = responsiveSp(22.sp))
-                Spacer(modifier = Modifier.weight(1f))
-                Text(text = "Close", color = Color.Cyan, fontSize = responsiveSp(16.sp), fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.End).padding(top = responsiveDp(16.dp)).clickable { onDismiss() })
-            }
+            Spacer(modifier = Modifier.height(responsiveDp(20.dp)))
         }
     }
 }
